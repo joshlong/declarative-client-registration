@@ -2,13 +2,22 @@ package auto;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.aop.framework.AopProxyUtils;
+import org.springframework.aot.hint.RuntimeHints;
+import org.springframework.aot.hint.RuntimeHintsRegistrar;
 import org.springframework.beans.factory.FactoryBean;
 import org.springframework.beans.factory.annotation.AnnotatedBeanDefinition;
+import org.springframework.beans.factory.aot.BeanFactoryInitializationAotContribution;
+import org.springframework.beans.factory.aot.BeanFactoryInitializationAotProcessor;
 import org.springframework.beans.factory.config.BeanDefinitionHolder;
+import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
 import org.springframework.beans.factory.support.AbstractBeanDefinition;
 import org.springframework.beans.factory.support.BeanDefinitionBuilder;
 import org.springframework.beans.factory.support.BeanDefinitionReaderUtils;
 import org.springframework.beans.factory.support.BeanDefinitionRegistry;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.ImportRuntimeHints;
 import org.springframework.web.service.annotation.HttpExchange;
 
 import java.util.function.BiConsumer;
@@ -46,9 +55,7 @@ class HttpExchangeAbstractDeclarativeClientRegistrar extends AbstractDeclarative
         @Override
         public boolean test(AnnotatedBeanDefinition beanDefinition) {
 
-            boolean match = beanDefinition.getMetadata()
-                    .getAnnotationTypes()
-                    .contains(HttpExchange.class.getName());
+            boolean match = beanDefinition.getMetadata().getAnnotationTypes().contains(HttpExchange.class.getName());
             if (match && log.isDebugEnabled()) {
                 log.debug("going to return true for " + beanDefinition.getBeanClassName() + '.');
             }
@@ -58,5 +65,65 @@ class HttpExchangeAbstractDeclarativeClientRegistrar extends AbstractDeclarative
 
     HttpExchangeAbstractDeclarativeClientRegistrar() {
         super(new HttpExchangeAbstractDeclarativeClientRegistrar.HttpExchangePredicate(), EnableHttpExchangeClients.class, new HttpExchangeAbstractDeclarativeClientRegistrar.HttpExchangeRegisteringBiConsumer());
+    }
+}
+
+class ManualHintsRegistrar implements RuntimeHintsRegistrar {
+
+    @Override
+    public void registerHints(RuntimeHints hints, ClassLoader classLoader) {
+        try {
+            hints.proxies().registerJdkProxy(
+                    AopProxyUtils.completeJdkProxyInterfaces(Class.forName("demo.Todos"))
+            );
+        } catch (ClassNotFoundException e) {
+            ///
+        }
+    }
+}
+
+@ImportRuntimeHints(ManualHintsRegistrar.class)
+@Configuration
+class DeclarativeClientAotConfiguration {
+
+    @Bean
+    static DeclarativeClientAotProcessor exchangeAotPostProcessor() {
+        return new DeclarativeClientAotProcessor();
+    }
+}
+
+class DeclarativeClientAotProcessor implements BeanFactoryInitializationAotProcessor {
+
+    private final Logger log = LoggerFactory.getLogger(getClass());
+
+    @Override
+    public BeanFactoryInitializationAotContribution processAheadOfTime(ConfigurableListableBeanFactory beanFactory) {
+        return null;
+/*
+
+        var list = new ArrayList<String>();
+        var beansWithAnnotation = beanFactory.getBeanNamesForAnnotation(HttpExchange.class);
+        for (var bn : beansWithAnnotation) {
+            var bd = beanFactory.getBeanDefinition(bn);
+            var clazz = bd.getBeanClassName();
+            if (log.isDebugEnabled()) {
+                log.debug("getting class name " + clazz);
+            }
+
+            list.add(clazz);
+        }
+
+        if (list.size() > 0) {
+            return (generationContext, beanFactoryInitializationCode) -> list
+                    .forEach(cn -> {
+                try {
+                    generationContext.getRuntimeHints().proxies().registerJdkProxy(AopProxyUtils.completeJdkProxyInterfaces(Class.forName(cn)));
+                }//
+                catch (ClassNotFoundException e) {
+                    log.error("oops!", e);
+                }
+            });
+        }*/
+
     }
 }
