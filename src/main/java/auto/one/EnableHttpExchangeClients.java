@@ -1,4 +1,4 @@
-package auto;
+package auto.one;
 
 import org.springframework.context.annotation.Import;
 

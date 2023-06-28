@@ -1,4 +1,4 @@
-package auto;
+package auto.one;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

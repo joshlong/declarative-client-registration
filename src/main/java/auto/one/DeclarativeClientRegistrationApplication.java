@@ -1,6 +1,5 @@
-package demo;
+package auto.one;
 
-import auto.EnableHttpExchangeClients;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -13,13 +12,12 @@ import org.springframework.web.service.annotation.HttpExchange;
 import java.util.List;
 
 
-@EnableHttpExchangeClients
 @SpringBootApplication
 public class DeclarativeClientRegistrationApplication {
 
-    public static void main(String[] args) {
+/*    public static void main(String[] args) {
         SpringApplication.run(DeclarativeClientRegistrationApplication.class, args);
-    }
+    }*/
 
     @Bean
     WebClient webClient(WebClient.Builder builder) {
