@@ -33,7 +33,6 @@ class DeclarativeClientFactoryBean<T> implements BeanFactoryAware, FactoryBean<T
         Map<String, WebClient> webClientMap = beanFactory.getBeansOfType(WebClient.class);
         Assert.state(webClientMap.size() >= 1, "there should be at least one WebClient!");
 
-
         MergedAnnotation<Qualifier> qualifierMergedAnnotation = MergedAnnotations.from(clazz).get(Qualifier.class);
         if (qualifierMergedAnnotation.isPresent()) {
             String valueOfQualifier = qualifierMergedAnnotation.getString(MergedAnnotation.VALUE);

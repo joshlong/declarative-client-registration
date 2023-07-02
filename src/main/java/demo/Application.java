@@ -1,20 +1,22 @@
 package demo;
 
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.aop.framework.AopProxyUtils;
+import org.springframework.aot.generate.GenerationContext;
+import org.springframework.aot.hint.MemberCategory;
 import org.springframework.aot.hint.RuntimeHints;
-import org.springframework.aot.hint.TypeReference;
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.BeanFactory;
 import org.springframework.beans.factory.annotation.AnnotatedBeanDefinition;
-import org.springframework.beans.factory.aot.BeanRegistrationAotProcessor;
+import org.springframework.beans.factory.aot.BeanFactoryInitializationAotContribution;
+import org.springframework.beans.factory.aot.BeanFactoryInitializationAotProcessor;
+import org.springframework.beans.factory.aot.BeanFactoryInitializationCode;
+import org.springframework.beans.factory.aot.BeanRegistrationExcludeFilter;
 import org.springframework.beans.factory.config.BeanDefinition;
-import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
-import org.springframework.beans.factory.support.BeanDefinitionBuilder;
-import org.springframework.beans.factory.support.BeanDefinitionRegistry;
-import org.springframework.beans.factory.support.BeanDefinitionRegistryPostProcessor;
+import org.springframework.beans.factory.support.*;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.AutoConfigurationPackages;
@@ -27,10 +29,11 @@ import org.springframework.core.ResolvableType;
 import org.springframework.core.annotation.MergedAnnotations;
 import org.springframework.core.env.Environment;
 import org.springframework.core.io.ResourceLoader;
-import org.springframework.core.type.classreading.MetadataReader;
 import org.springframework.core.type.filter.AnnotationTypeFilter;
 import org.springframework.core.type.filter.TypeFilter;
+import org.springframework.javapoet.MethodSpec;
 import org.springframework.util.Assert;
+import org.springframework.util.ClassUtils;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.support.WebClientAdapter;
@@ -38,11 +41,14 @@ import org.springframework.web.service.annotation.GetExchange;
 import org.springframework.web.service.annotation.HttpExchange;
 import org.springframework.web.service.invoker.HttpServiceProxyFactory;
 
-import java.io.Serializable;
-import java.util.ArrayList;
+import javax.lang.model.element.Modifier;
+import java.lang.annotation.*;
 import java.util.List;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
+import java.util.stream.Stream;
 
+@Slf4j
 @SpringBootApplication
 public class Application {
 
@@ -60,138 +66,124 @@ public class Application {
         return a -> todos.todos().forEach(System.out::println);
     }
 
-    @Bean
-    static BeanRegistrationAotProcessor beanRegistrationAotProcessor() {
-        return registeredBean -> {
-            System.out.println("analyzing bean of type " + registeredBean.getBeanClass().getName() + " at compile time.");
-            if (Serializable.class.isAssignableFrom(registeredBean.getBeanClass())) {
-                System.out.println("found a bean that is serializable: " + registeredBean.getBeanClass());
-                return (generationContext, beanRegistrationCode) -> {
-                    RuntimeHints hints = generationContext.getRuntimeHints();
-                    hints.serialization().registerType(TypeReference.of(registeredBean.getBeanClass().getName()));
-                };
-            }
-            return null;
-        };
-    }
-
 
     @Bean
-    static Definer beanDefinitionRegistryPostProcessor() {
+    static Definer declarativeHttpInterfaceAutoRegistrar() {
         return new Definer();
     }
 
-    @Bean
-    BeanPostProcessor beanPostProcessor() {
-        return new BeanPostProcessor() {
-            @Override
-            public Object postProcessAfterInitialization(Object bean, String beanName) throws BeansException {
-                if (Cat.class.isAssignableFrom(bean.getClass())) {
-                    System.out.println("post processing " + bean.getClass().getName() + " with bean name " + beanName);
-                }
-                return bean;
-            }
-        };
-    }
+}
 
+interface ClientDetectionStrategy extends Predicate<Class<?>> {
 
 }
 
 
-class Definer implements BeanDefinitionRegistryPostProcessor, ResourceLoaderAware, EnvironmentAware {
+@Slf4j
+class HttpClientClientDetectionStrategy implements ClientDetectionStrategy {
 
-    private final Logger log = LoggerFactory.getLogger(getClass());
+    private final MergedAnnotations.Search mergedAnnotations =
+            MergedAnnotations.search(MergedAnnotations.SearchStrategy.TYPE_HIERARCHY);
+
+
+    @Override
+    public boolean test(Class<?> aClass) {
+        var match =
+                this.mergedAnnotations.from(aClass).get(AutoClient.class).isPresent() &&
+                this.mergedAnnotations.from(aClass).get(HttpExchange.class).isPresent();
+        return match;
+    }
+}
+
+
+// todo make this an abstract class with parameters for candidate detection, method detection, hints
+//  registration strategies, and AOT code generation so that we can plugin http, rsocket, graphql, chatgpt, etc.
+
+@Slf4j
+class Definer implements
+        BeanRegistrationExcludeFilter,
+        BeanFactoryInitializationAotProcessor, BeanDefinitionRegistryPostProcessor, ResourceLoaderAware, EnvironmentAware {
+
 
     private Environment environment;
 
     private ResourceLoader resourceLoader;
 
-    private boolean isCandidate(BeanDefinition beanDefinition) throws Exception {
-        // todo make sure not to register interfaces that people plan to manually register
-        String beanClassName = beanDefinition.getBeanClassName();
-        Class<?> aClass = Class.forName(beanClassName);
-        MergedAnnotations.Search search = MergedAnnotations.search(MergedAnnotations.SearchStrategy.TYPE_HIERARCHY);
-        return search.from(aClass).get(HttpExchange.class).isPresent();
+    //todo parameterize this
+    private final ClientDetectionStrategy detectionStrategy = new HttpClientClientDetectionStrategy();
+
+    @Override
+    public boolean isExcludedFromAotProcessing(RegisteredBean registeredBean) {
+        return this.detectionStrategy.test(registeredBean.getBeanClass());
     }
 
-    private void registerBeanDefinitionForInterface(BeanDefinitionRegistry registry, BeanDefinition beanDefinition) throws Exception {
-        String beanClassName = beanDefinition.getBeanClassName();
-        log.debug("going to register " + beanClassName + " as a HttpServiceProxyFactory declarative client");
+
+    // todo make this abstract so that it can be changed for RSocket or HTTP or whatever else we decide upon
+    @SneakyThrows
+    private boolean isCandidate(BeanDefinition beanDefinition) {
+        var beanClassName = beanDefinition.getBeanClassName();
+        var aClass = ClassUtils.resolveClassName(beanClassName, null);
+        return this.detectionStrategy.test(aClass);
+
+    }
+
+    @SneakyThrows
+    private void registerBeanDefinitionForInterface(BeanDefinitionRegistry registry, BeanDefinition beanDefinition) {
+        var beanClassName = beanDefinition.getBeanClassName();
         var aClass = Class.forName(beanClassName);
         var supplier = (Supplier<?>) () -> {
             if (registry instanceof BeanFactory bf) {
-                return HttpServiceProxyFactory
-                        .builder(WebClientAdapter.forClient(bf.getBean(WebClient.class))).build()
-                        .createClient(aClass);
+                return HttpServiceProxyFactory.builder(WebClientAdapter.forClient(bf.getBean(WebClient.class))).build().createClient(aClass);
             }
-            log.error("No access to a BeanFactory!");
             return null;
         };
-
-        BeanDefinition definition = BeanDefinitionBuilder.rootBeanDefinition(ResolvableType.forClass(aClass), supplier)
-                .getBeanDefinition();
+        var definition = BeanDefinitionBuilder.rootBeanDefinition(ResolvableType.forClass(aClass), supplier).getBeanDefinition();
         registry.registerBeanDefinition(aClass.getSimpleName(), definition);
+        log.debug("registering bean for " + beanClassName);
+    }
 
-        log
-                .debug("registering bean for " + beanClassName);
+    private static Stream<BeanDefinition> discoverCandidates(BeanFactory beanFactory, Environment environment, ResourceLoader resourceLoader, Predicate<BeanDefinition> predicate) {
+        var basePackages = (AutoConfigurationPackages.get(beanFactory));
+        Assert.state(basePackages.size() >= 1, "there should be at least one package!");
+        Assert.notNull(environment, "the Environment must not be null");
+        Assert.notNull(resourceLoader, "the ResourceLoader must not be null");
+        var scanner = buildScanner(environment, null, resourceLoader);
+        return basePackages.stream().flatMap(bp -> scanner.findCandidateComponents(bp).stream()).filter(predicate::test);
     }
 
     @Override
     public void postProcessBeanDefinitionRegistry(BeanDefinitionRegistry registry) throws BeansException {
-        // find packages
-        List<String> basePackages = new ArrayList<>();
         if (registry instanceof BeanFactory beanFactory) {
-            basePackages.addAll(AutoConfigurationPackages.get(beanFactory));
-        }
-        Assert.state(basePackages.size() >= 1, "there should be at least one package!");
-        Assert.notNull(this.environment, "the Environment must not be null");
-        Assert.notNull(this.resourceLoader, "the ResourceLoader must not be null");
-        TypeFilter typeFilter = new AnnotationTypeFilter(HttpExchange.class);
-        ClassPathScanningCandidateComponentProvider scanner = buildScanner(this.environment, typeFilter, this.resourceLoader);
-        basePackages.stream() //
-                .flatMap(bp -> scanner.findCandidateComponents(bp).stream())//
-                .filter(f -> {
-                    try {
-                        return isCandidate(f);
-                    } //
-                    catch (Exception e) {
-                        log.error("oops!", e);
-                    }
-                    return false;
-                })//
-                .forEach(x -> {
-                    try {
-                        registerBeanDefinitionForInterface(registry, x);
-                    }//
-                    catch (Exception e) {
-                        log.error("oops!", e);
-                    }
-                });//
-
-
+            discoverCandidates(beanFactory, this.environment, this.resourceLoader, this::isCandidate)//
+                    .forEach(x -> registerBeanDefinitionForInterface(registry, x));
+        }//
+        else throw new IllegalStateException(
+                "Error! The BeanDefinitionRegistry is not an instance of " + BeanFactory.class.getName());
     }
 
     @Override
     public void postProcessBeanFactory(ConfigurableListableBeanFactory beanFactory) throws BeansException {
-
     }
 
+
     private static ClassPathScanningCandidateComponentProvider buildScanner(Environment environment, TypeFilter typeFilter, ResourceLoader resourceLoader) {
-        ClassPathScanningCandidateComponentProvider scanner = new ClassPathScanningCandidateComponentProvider(false, environment) {
+        var scanner = new ClassPathScanningCandidateComponentProvider(false, environment) {
 
             @Override
             protected boolean isCandidateComponent(AnnotatedBeanDefinition beanDefinition) {
-                return beanDefinition.getMetadata().isIndependent();
+                var isCandidate = false;
+                if (beanDefinition.getMetadata().isIndependent()) {
+                    if (!beanDefinition.getMetadata().isAnnotation()) {
+                        isCandidate = true;
+                    }
+                }
+                return isCandidate;
             }
 
-            @Override
-            protected boolean isCandidateComponent(MetadataReader metadataReader) {
-                return !metadataReader.getClassMetadata().isAnnotation();
-            }
         };
+        scanner.addIncludeFilter(new AnnotationTypeFilter(AutoClient.class));
         scanner.setResourceLoader(resourceLoader);
         scanner.clearCache();
-        scanner.addIncludeFilter(typeFilter);
         return scanner;
     }
 
@@ -204,16 +196,91 @@ class Definer implements BeanDefinitionRegistryPostProcessor, ResourceLoaderAwar
     public void setResourceLoader(ResourceLoader resourceLoader) {
         this.resourceLoader = resourceLoader;
     }
-}
 
-class Cat implements Serializable {
-
-    Cat() {
-        System.out.println("hello cat");
+    @Override
+    public BeanFactoryInitializationAotContribution processAheadOfTime(ConfigurableListableBeanFactory beanFactory) {
+        var candidates = discoverCandidates(beanFactory, this.environment, this.resourceLoader, this::isCandidate)
+                .toList();
+        return candidates.isEmpty() ? null : new AotContribution(beanFactory, candidates);
     }
 }
 
+/**
+ * We'll have excluded the runtime code and now need to provide an AOT-equivalent of it.
+ */
+@Slf4j
+class AotContribution implements BeanFactoryInitializationAotContribution {
 
+    private final List<BeanDefinition> candidates;
+
+    private final ConfigurableListableBeanFactory beanFactory;
+
+    AotContribution(ConfigurableListableBeanFactory beanFactory, List<BeanDefinition> candidates) {
+        this.candidates = candidates;
+        this.beanFactory = beanFactory;
+    }
+
+    @Override
+    public void applyTo(GenerationContext generationContext,
+                        BeanFactoryInitializationCode beanFactoryInitializationCode) {
+        for (var bdn : this.beanFactory.getBeanDefinitionNames()) {
+            log.debug("bdn: " + bdn);
+        }
+        this.candidates.forEach(bd -> System.out.println("it's my job to register " + bd.getBeanClassName()));
+
+        var initializingMethodReference = beanFactoryInitializationCode
+                .getMethods()
+                .add("autoRegisterProtocolClients", m -> generateMethod(m, generationContext.getRuntimeHints()))
+                .toMethodReference();
+        beanFactoryInitializationCode.addInitializer(initializingMethodReference);
+    }
+
+    private void generateMethod(MethodSpec.Builder m, RuntimeHints hints) {
+        m.addModifiers(Modifier.PUBLIC);
+        m.addJavadoc("register declarative clients  ");
+        m.addParameter(DefaultListableBeanFactory.class, "registry");
+
+        this.candidates.forEach(beanDefinition -> {
+            var clazzName = beanDefinition.getBeanClassName();
+            var clazz = ClassUtils.resolveClassName(clazzName, null);
+            hints.proxies().registerJdkProxy(
+                    AopProxyUtils.completeJdkProxyInterfaces( clazz)
+            ) ;
+            hints.reflection().registerType(Todos.class, MemberCategory.values());
+            hints.reflection().registerType(Todo.class, MemberCategory.values());
+
+            var javaCode =
+                    """
+                             Class<$T> aClass = (Class<$T>)  $T.resolveClassName( $S , null );
+                             $L<$L> supplier = ($L<$L>) () -> {
+                                 return $T.builder( $T.forClient( registry.getBean($L.class))).build().createClient(aClass);
+                             };
+                             $L definition = $L.rootBeanDefinition( $L.forClass(aClass), supplier).getBeanDefinition();
+                             registry.registerBeanDefinition(aClass.getSimpleName(), definition);
+                            """;
+
+            m.addCode(javaCode,//
+                    clazz, clazz,
+                    ClassUtils.class, clazzName,//
+                    Supplier.class.getName(), clazzName, Supplier.class.getName(), clazzName,//
+                    HttpServiceProxyFactory.class, WebClientAdapter.class,
+                    WebClient.class.getName(),
+                    BeanDefinition.class.getName(), BeanDefinitionBuilder.class.getName(), ResolvableType.class.getName());
+        });
+    }
+
+
+}
+
+// todo strawman annotation so we have way to know whether to turn this into a bean (we don't want to conflict if the user decides to register their own)
+@Target(ElementType.TYPE)
+@Retention(RetentionPolicy.RUNTIME)
+@Documented
+@Inherited
+@interface AutoClient {
+}
+
+@AutoClient
 @HttpExchange("https://jsonplaceholder.typicode.com")
 interface Todos {
 
