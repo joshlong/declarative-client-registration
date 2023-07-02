@@ -11,35 +11,35 @@ import org.springframework.web.service.annotation.HttpExchange;
 
 import java.util.List;
 
-
 @SpringBootApplication
 public class DeclarativeClientRegistrationApplication {
 
-/*    public static void main(String[] args) {
-        SpringApplication.run(DeclarativeClientRegistrationApplication.class, args);
-    }*/
+	/*
+	 * public static void main(String[] args) {
+	 * SpringApplication.run(DeclarativeClientRegistrationApplication.class, args); }
+	 */
 
-    @Bean
-    WebClient webClient(WebClient.Builder builder) {
-        return builder.build();
-    }
+	@Bean
+	WebClient webClient(WebClient.Builder builder) {
+		return builder.build();
+	}
 
-    @Bean
-    ApplicationRunner runner(Todos todos) {
-        return args -> todos.todos().forEach(System.out::println);
-    }
+	@Bean
+	ApplicationRunner runner(Todos todos) {
+		return args -> todos.todos().forEach(System.out::println);
+	}
 
 }
-
 
 @HttpExchange("https://jsonplaceholder.typicode.com")
 interface Todos {
 
-    @GetExchange("/todos")
-    List<Todo> todos();
+	@GetExchange("/todos")
+	List<Todo> todos();
 
-    @GetExchange("/todos/{id}")
-    List<Todo> todoById(@PathVariable int id);
+	@GetExchange("/todos/{id}")
+	List<Todo> todoById(@PathVariable int id);
+
 }
 
 record Todo(int userId, int id, String title, boolean completed) {

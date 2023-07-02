@@ -28,108 +28,109 @@ import java.util.function.BiConsumer;
 import java.util.function.Predicate;
 
 /**
- * Discovers and registers declarative interfaces if the interface matches a particular predicate.
+ * Discovers and registers declarative interfaces if the interface matches a particular
+ * predicate.
  */
-class AbstractDeclarativeClientRegistrar implements ImportBeanDefinitionRegistrar, EnvironmentAware, ResourceLoaderAware {
+class AbstractDeclarativeClientRegistrar
+		implements ImportBeanDefinitionRegistrar, EnvironmentAware, ResourceLoaderAware {
 
-    private final Logger log = LoggerFactory.getLogger(getClass());
+	private final Logger log = LoggerFactory.getLogger(getClass());
 
-    private Environment environment;
+	private Environment environment;
 
-    private ResourceLoader resourceLoader;
+	private ResourceLoader resourceLoader;
 
-    private final Class<? extends Annotation> enableAnnotation;
+	private final Class<? extends Annotation> enableAnnotation;
 
-    private final BiConsumer<AnnotatedBeanDefinition, BeanDefinitionRegistry> registeringBiConsumer;
+	private final BiConsumer<AnnotatedBeanDefinition, BeanDefinitionRegistry> registeringBiConsumer;
 
-    private final TypeFilter typeFilter = new AnnotationTypeFilter(HttpExchange.class);
+	private final TypeFilter typeFilter = new AnnotationTypeFilter(HttpExchange.class);
 
-    private final Predicate<AnnotatedBeanDefinition> predicate;
+	private final Predicate<AnnotatedBeanDefinition> predicate;
 
+	AbstractDeclarativeClientRegistrar(Predicate<AnnotatedBeanDefinition> predicate,
+			Class<? extends Annotation> annotation,
+			BiConsumer<AnnotatedBeanDefinition, BeanDefinitionRegistry> registeringBiConsumer) {
+		this.enableAnnotation = annotation;
+		this.predicate = predicate;
+		this.registeringBiConsumer = registeringBiConsumer;
+		Assert.notNull(this.enableAnnotation, "the @Enable* annotation must not be null");
+		Assert.notNull(this.registeringBiConsumer, "the registeringBiConsumer must not be null");
+	}
 
-    AbstractDeclarativeClientRegistrar(
-            Predicate<AnnotatedBeanDefinition> predicate,
-            Class<? extends Annotation> annotation, BiConsumer<AnnotatedBeanDefinition, BeanDefinitionRegistry> registeringBiConsumer) {
-        this.enableAnnotation = annotation;
-        this.predicate = predicate;
-        this.registeringBiConsumer = registeringBiConsumer;
-        Assert.notNull(this.enableAnnotation, "the @Enable* annotation must not be null");
-        Assert.notNull(this.registeringBiConsumer, "the registeringBiConsumer must not be null");
-    }
+	@Override
+	public void registerBeanDefinitions(AnnotationMetadata importingClassMetadata, BeanDefinitionRegistry registry,
+			BeanNameGenerator importBeanNameGenerator) {
 
-    @Override
-    public void registerBeanDefinitions(AnnotationMetadata importingClassMetadata, BeanDefinitionRegistry registry,
-                                        BeanNameGenerator importBeanNameGenerator) {
+		this.getBasePackages(importingClassMetadata)
+			.stream()
+			.flatMap(basePackage -> this.buildScanner()
+				.findCandidateComponents(basePackage)//
+				.stream()//
+				.filter(cc -> cc instanceof AnnotatedBeanDefinition)//
+				.map(abd -> (AnnotatedBeanDefinition) abd)//
+				.filter(this.predicate::test))
+			.forEach(annotatedBeanDefinition -> this.registeringBiConsumer.accept(annotatedBeanDefinition, registry));
+	}
 
-        this.getBasePackages(importingClassMetadata)
-                .stream()
-                .flatMap(basePackage -> this.buildScanner().findCandidateComponents(basePackage)//
-                        .stream()//
-                        .filter(cc -> cc instanceof AnnotatedBeanDefinition)//
-                        .map(abd -> (AnnotatedBeanDefinition) abd)//
-                        .filter(this.predicate::test))
-                .forEach(annotatedBeanDefinition -> this.registeringBiConsumer.accept(annotatedBeanDefinition, registry));
-    }
+	private Set<String> getBasePackages(AnnotationMetadata importingClassMetadata) {
 
+		Map<String, Object> attributes = importingClassMetadata
+			.getAnnotationAttributes(this.enableAnnotation.getCanonicalName());
 
-    private Set<String> getBasePackages(AnnotationMetadata importingClassMetadata) {
+		Set<String> basePackages = new HashSet<>();
 
-        Map<String, Object> attributes = importingClassMetadata
-                .getAnnotationAttributes(this.enableAnnotation.getCanonicalName());
+		if (attributes.containsKey("value"))
+			for (String pkg : (String[]) attributes.get("value")) {
+				if (StringUtils.hasText(pkg)) {
+					basePackages.add(pkg);
+				}
+			}
+		if (attributes.containsKey("basePackages"))
+			for (String pkg : (String[]) attributes.get("basePackages")) {
+				if (StringUtils.hasText(pkg)) {
+					basePackages.add(pkg);
+				}
+			}
+		if (attributes.containsKey("basePackageClasses"))
+			for (Class<?> clazz : (Class[]) attributes.get("basePackageClasses")) {
+				basePackages.add(ClassUtils.getPackageName(clazz));
+			}
 
+		if (basePackages.isEmpty()) {
+			basePackages.add(ClassUtils.getPackageName(importingClassMetadata.getClassName()));
+		}
 
-        Set<String> basePackages = new HashSet<>();
+		return basePackages;
+	}
 
-        if (attributes.containsKey("value"))
-            for (String pkg : (String[]) attributes.get("value")) {
-                if (StringUtils.hasText(pkg)) {
-                    basePackages.add(pkg);
-                }
-            }
-        if (attributes.containsKey("basePackages"))
-            for (String pkg : (String[]) attributes.get("basePackages")) {
-                if (StringUtils.hasText(pkg)) {
-                    basePackages.add(pkg);
-                }
-            }
-        if (attributes.containsKey("basePackageClasses"))
-            for (Class<?> clazz : (Class[]) attributes.get("basePackageClasses")) {
-                basePackages.add(ClassUtils.getPackageName(clazz));
-            }
+	private ClassPathScanningCandidateComponentProvider buildScanner() {
+		ClassPathScanningCandidateComponentProvider scanner = new ClassPathScanningCandidateComponentProvider(false,
+				this.environment) {
 
-        if (basePackages.isEmpty()) {
-            basePackages.add(ClassUtils.getPackageName(importingClassMetadata.getClassName()));
-        }
+			@Override
+			protected boolean isCandidateComponent(AnnotatedBeanDefinition beanDefinition) {
+				return beanDefinition.getMetadata().isIndependent();
+			}
 
-        return basePackages;
-    }
+			@Override
+			protected boolean isCandidateComponent(MetadataReader metadataReader) {
+				return !metadataReader.getClassMetadata().isAnnotation();
+			}
+		};
+		scanner.addIncludeFilter(this.typeFilter);
+		scanner.setResourceLoader(this.resourceLoader);
+		return scanner;
+	}
 
-    private ClassPathScanningCandidateComponentProvider buildScanner() {
-        ClassPathScanningCandidateComponentProvider scanner = new ClassPathScanningCandidateComponentProvider(false,
-                this.environment) {
+	@Override
+	public void setResourceLoader(ResourceLoader resourceLoader) {
+		this.resourceLoader = resourceLoader;
+	}
 
-            @Override
-            protected boolean isCandidateComponent(AnnotatedBeanDefinition beanDefinition) {
-                return beanDefinition.getMetadata().isIndependent();
-            }
+	@Override
+	public void setEnvironment(Environment environment) {
+		this.environment = environment;
+	}
 
-            @Override
-            protected boolean isCandidateComponent(MetadataReader metadataReader) {
-                return !metadataReader.getClassMetadata().isAnnotation();
-            }
-        };
-        scanner.addIncludeFilter(this.typeFilter);
-        scanner.setResourceLoader(this.resourceLoader);
-        return scanner;
-    }
-
-    @Override
-    public void setResourceLoader(ResourceLoader resourceLoader) {
-        this.resourceLoader = resourceLoader;
-    }
-
-    @Override
-    public void setEnvironment(Environment environment) {
-        this.environment = environment;
-    }
 }

@@ -9,4 +9,5 @@ import java.lang.annotation.*;
 @Documented
 @Import(HttpExchangeAbstractDeclarativeClientRegistrar.class)
 public @interface EnableHttpExchangeClients {
+
 }
