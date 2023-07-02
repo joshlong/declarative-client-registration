@@ -22,7 +22,6 @@ import org.springframework.core.ResolvableType;
 import org.springframework.core.env.Environment;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.core.type.filter.AnnotationTypeFilter;
-import org.springframework.core.type.filter.TypeFilter;
 import org.springframework.util.Assert;
 import org.springframework.util.ClassUtils;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -85,7 +84,7 @@ class AutoClientRegistrar implements BeanRegistrationExcludeFilter, BeanFactoryI
 		Assert.state(basePackages.size() >= 1, "there should be at least one package!");
 		Assert.notNull(environment, "the Environment must not be null");
 		Assert.notNull(resourceLoader, "the ResourceLoader must not be null");
-		var scanner = buildScanner(environment, null, resourceLoader);
+		var scanner = buildScanner(environment, resourceLoader);
 		return basePackages.stream().flatMap(bp -> scanner.findCandidateComponents(bp).stream()).filter(predicate);
 	}
 
@@ -106,7 +105,7 @@ class AutoClientRegistrar implements BeanRegistrationExcludeFilter, BeanFactoryI
 	}
 
 	private static ClassPathScanningCandidateComponentProvider buildScanner(Environment environment,
-			TypeFilter typeFilter, ResourceLoader resourceLoader) {
+			ResourceLoader resourceLoader) {
 		var scanner = new ClassPathScanningCandidateComponentProvider(false, environment) {
 
 			@Override
