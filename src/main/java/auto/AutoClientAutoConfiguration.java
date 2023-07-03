@@ -1,9 +1,9 @@
 package auto;
 
 import org.springframework.boot.autoconfigure.AutoConfiguration;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.context.annotation.Bean;
-import org.springframework.web.reactive.function.client.WebClient;
+
+import java.util.Map;
 
 /**
  * @author Josh Long
@@ -12,13 +12,12 @@ import org.springframework.web.reactive.function.client.WebClient;
 class AutoClientAutoConfiguration {
 
 	@Bean
-	@ConditionalOnClass({ WebClient.class })
-	static HttpClientClientDetectionStrategy detectionStrategy() {
-		return new HttpClientClientDetectionStrategy();
+	static AutoClientAdapter httpAutoClientAdapter() {
+		return new HttpAutoClientAdapter();
 	}
 
 	@Bean
-	static AutoClientRegistrar autoClientRegistrar(ClientDetectionStrategy strategy) {
+	static AutoClientRegistrar autoClientRegistrar(Map<String, AutoClientAdapter> strategy) {
 		return new AutoClientRegistrar(strategy);
 	}
 

@@ -2,18 +2,20 @@ package auto;
 
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.aop.framework.AopProxyUtils;
+import org.springframework.aot.generate.GenerationContext;
+import org.springframework.aot.hint.RuntimeHints;
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.BeanFactory;
+import org.springframework.beans.factory.ListableBeanFactory;
 import org.springframework.beans.factory.annotation.AnnotatedBeanDefinition;
 import org.springframework.beans.factory.aot.BeanFactoryInitializationAotContribution;
 import org.springframework.beans.factory.aot.BeanFactoryInitializationAotProcessor;
+import org.springframework.beans.factory.aot.BeanFactoryInitializationCode;
 import org.springframework.beans.factory.aot.BeanRegistrationExcludeFilter;
 import org.springframework.beans.factory.config.BeanDefinition;
 import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
-import org.springframework.beans.factory.support.BeanDefinitionBuilder;
-import org.springframework.beans.factory.support.BeanDefinitionRegistry;
-import org.springframework.beans.factory.support.BeanDefinitionRegistryPostProcessor;
-import org.springframework.beans.factory.support.RegisteredBean;
+import org.springframework.beans.factory.support.*;
 import org.springframework.boot.autoconfigure.AutoConfigurationPackages;
 import org.springframework.context.EnvironmentAware;
 import org.springframework.context.ResourceLoaderAware;
@@ -22,13 +24,14 @@ import org.springframework.core.ResolvableType;
 import org.springframework.core.env.Environment;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.core.type.filter.AnnotationTypeFilter;
+import org.springframework.javapoet.MethodSpec;
 import org.springframework.util.Assert;
 import org.springframework.util.ClassUtils;
-import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.web.reactive.function.client.support.WebClientAdapter;
-import org.springframework.web.service.invoker.HttpServiceProxyFactory;
 
-import java.util.function.Predicate;
+import javax.lang.model.element.Modifier;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
@@ -39,60 +42,62 @@ import java.util.stream.Stream;
 class AutoClientRegistrar implements BeanRegistrationExcludeFilter, BeanFactoryInitializationAotProcessor,
 		BeanDefinitionRegistryPostProcessor, ResourceLoaderAware, EnvironmentAware {
 
-	private final ClientDetectionStrategy detectionStrategy;
+	private final Map<String, AutoClientAdapter> adapters;
 
 	private Environment environment;
 
 	private ResourceLoader resourceLoader;
 
-	AutoClientRegistrar(ClientDetectionStrategy detectionStrategy) {
-		this.detectionStrategy = detectionStrategy;
+	AutoClientRegistrar(Map<String, AutoClientAdapter> adapters) {
+		this.adapters = adapters;
 	}
 
 	@Override
 	public boolean isExcludedFromAotProcessing(RegisteredBean registeredBean) {
-		return this.detectionStrategy.test(registeredBean.getBeanClass());
+		return isCandidateClient(registeredBean.getBeanClass());
+	}
+
+	private boolean isCandidateClient(Class<?> clzz) {
+		return ClassifierUtils.classifyAdapterBeanNameForClient(this.adapters, clzz) != null;
 	}
 
 	@SneakyThrows
-	private boolean isCandidate(BeanDefinition beanDefinition) {
-		var beanClassName = beanDefinition.getBeanClassName();
-		var aClass = ClassUtils.resolveClassName(beanClassName, null);
-		return this.detectionStrategy.test(aClass);
-	}
-
-	@SneakyThrows
-	private void registerBeanDefinitionForClient(BeanDefinitionRegistry registry, BeanDefinition beanDefinition) {
+	private void registerBeanDefinitionForClient(AutoClientAdapter adapter, BeanDefinitionRegistry registry,
+			BeanDefinition beanDefinition) {
 		var beanClassName = beanDefinition.getBeanClassName();
 		var aClass = Class.forName(beanClassName);
-		var supplier = (Supplier<?>) () -> {
-			if (registry instanceof BeanFactory bf) {
-				return HttpServiceProxyFactory.builder(WebClientAdapter.forClient(bf.getBean(WebClient.class)))
-					.build()
-					.createClient(aClass);
-			}
-			return null;
-		};
+		var supplier = (Supplier<?>) () -> adapter.createSupplierForInterface(registry, aClass);
 		var definition = BeanDefinitionBuilder.rootBeanDefinition(ResolvableType.forClass(aClass), supplier)
 			.getBeanDefinition();
 		registry.registerBeanDefinition(aClass.getSimpleName(), definition);
 	}
 
-	private static Stream<BeanDefinition> discoverCandidates(BeanFactory beanFactory, Environment environment,
-			ResourceLoader resourceLoader, Predicate<BeanDefinition> predicate) {
-		var basePackages = (AutoConfigurationPackages.get(beanFactory));
+	private Stream<BeanDefinition> discoverCandidates(BeanFactory beanFactory, Environment environment,
+			ResourceLoader resourceLoader) {
+		var basePackages = AutoConfigurationPackages.get(beanFactory);
 		Assert.state(basePackages.size() >= 1, "there should be at least one package!");
 		Assert.notNull(environment, "the Environment must not be null");
 		Assert.notNull(resourceLoader, "the ResourceLoader must not be null");
 		var scanner = buildScanner(environment, resourceLoader);
-		return basePackages.stream().flatMap(bp -> scanner.findCandidateComponents(bp).stream()).filter(predicate);
+		return basePackages.stream()
+			.flatMap(bp -> scanner.findCandidateComponents(bp).stream())
+			.filter(c -> this.isCandidateClient(ClassUtils.resolveClassName(c.getBeanClassName(), null)));
 	}
 
 	@Override
 	public void postProcessBeanDefinitionRegistry(BeanDefinitionRegistry registry) throws BeansException {
-		if (registry instanceof BeanFactory beanFactory) {
-			discoverCandidates(beanFactory, this.environment, this.resourceLoader, this::isCandidate)//
-				.forEach(x -> registerBeanDefinitionForClient(registry, x));
+		if (registry instanceof ListableBeanFactory beanFactory) {
+			// todo make it so that we classify the types and assign them one of possibly
+			// many {@link AutoClientAdapter}s
+			discoverCandidates(beanFactory, this.environment, this.resourceLoader)//
+				.forEach(beanDefinition -> {
+					var clazz = ClassUtils.resolveClassName(Objects.requireNonNull(beanDefinition.getBeanClassName()),
+							null);
+					var adapterBeanName = ClassifierUtils
+						.classifyAdapterBeanNameForClient(beanFactory.getBeansOfType(AutoClientAdapter.class), clazz);
+					var autoClientAdapter = beanFactory.getBean(adapterBeanName, AutoClientAdapter.class);
+					registerBeanDefinitionForClient(autoClientAdapter, registry, beanDefinition);
+				});
 		} //
 		else
 			throw new IllegalStateException(
@@ -138,9 +143,85 @@ class AutoClientRegistrar implements BeanRegistrationExcludeFilter, BeanFactoryI
 
 	@Override
 	public BeanFactoryInitializationAotContribution processAheadOfTime(ConfigurableListableBeanFactory beanFactory) {
-		var candidates = discoverCandidates(beanFactory, this.environment, this.resourceLoader, this::isCandidate)
-			.toList();
-		return candidates.isEmpty() ? null : new AutoClientRegistrarAotContribution(beanFactory, candidates);
+		var candidates = discoverCandidates(beanFactory, this.environment, this.resourceLoader).toList();
+		return candidates.isEmpty() ? null : new AutoClientRegistrarAotContribution(candidates,
+				beanFactory.getBeansOfType(AutoClientAdapter.class));
+	}
+
+}
+
+abstract class ClassifierUtils {
+
+	// todo put this in the registrar and make the contribution an inner class.
+	static String classifyAdapterBeanNameForClient(Map<String, AutoClientAdapter> adapters, Class<?> clzz) {
+		for (var beanName : adapters.keySet()) {
+			var adapter = adapters.get(beanName);
+			if (adapter.test(clzz)) {
+				return beanName;
+			}
+		}
+		return null;
+	}
+
+}
+
+/**
+ * Automatically registers clients both at runtime or compile time
+ *
+ * @author Josh Long
+ */
+@Slf4j
+class AutoClientRegistrarAotContribution implements BeanFactoryInitializationAotContribution {
+
+	private final List<BeanDefinition> candidates;
+
+	private final Map<String, AutoClientAdapter> adapters;
+
+	AutoClientRegistrarAotContribution(List<BeanDefinition> candidates, Map<String, AutoClientAdapter> adapters) {
+		this.candidates = candidates;
+		this.adapters = adapters;
+	}
+
+	@Override
+	public void applyTo(GenerationContext generationContext,
+			BeanFactoryInitializationCode beanFactoryInitializationCode) {
+		var runtimeHints = generationContext.getRuntimeHints();
+		var initializingMethodReference = beanFactoryInitializationCode//
+			.getMethods()//
+			.add("autoRegisterClients", methodBuilder -> generateMethod(methodBuilder, runtimeHints))//
+			.toMethodReference();
+		beanFactoryInitializationCode.addInitializer(initializingMethodReference);
+	}
+
+	private void generateMethod(MethodSpec.Builder m, RuntimeHints hints) {
+		m.addModifiers(Modifier.PUBLIC);
+		m.addJavadoc("Automatically register service clients ");
+		m.addParameter(DefaultListableBeanFactory.class, "registry");
+		this.candidates.forEach(beanDefinition -> {
+			Class<?> clazz = ClassUtils.resolveClassName(Objects.requireNonNull(beanDefinition.getBeanClassName()),
+					null);
+			hints.proxies().registerJdkProxy(AopProxyUtils.completeJdkProxyInterfaces(clazz));
+			// todo rewrite this to use ClassifierUtils#classify
+			// todo this should be rewritten to use the AutoClientAdapter
+
+			var beanName = ClassifierUtils.classifyAdapterBeanNameForClient(this.adapters, clazz);
+			var javaCode = """
+
+					 System.out.println( registry.getBeanDefinitionNames());
+					 Class<$T> aClass = $T.class ;
+					 $T<$T> supplier =  () -> {
+					   return registry.getBean( $S, $T.class )
+					      .createSupplierForInterface(registry, aClass)  ;
+					  };
+					 $T definition = $T.rootBeanDefinition(   aClass , supplier).getBeanDefinition();
+					 registry.registerBeanDefinition(aClass.getSimpleName(), definition);
+					""";
+			m.addCode(javaCode, //
+					clazz, clazz, //
+					Supplier.class, clazz, beanName, AutoClientAdapter.class, //
+					BeanDefinition.class, BeanDefinitionBuilder.class//
+			);
+		});
 	}
 
 }
