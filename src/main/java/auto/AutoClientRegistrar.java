@@ -201,18 +201,11 @@ class AutoClientRegistrarAotContribution implements BeanFactoryInitializationAot
 			Class<?> clazz = ClassUtils.resolveClassName(Objects.requireNonNull(beanDefinition.getBeanClassName()),
 					null);
 			hints.proxies().registerJdkProxy(AopProxyUtils.completeJdkProxyInterfaces(clazz));
-			// todo rewrite this to use ClassifierUtils#classify
-			// todo this should be rewritten to use the AutoClientAdapter
-
 			var beanName = ClassifierUtils.classifyAdapterBeanNameForClient(this.adapters, clazz);
 			var javaCode = """
-
-					 System.out.println( registry.getBeanDefinitionNames());
-					 Class<$T> aClass = $T.class ;
-					 $T<$T> supplier =  () -> {
-					   return registry.getBean( $S, $T.class )
-					      .createSupplierForInterface(registry, aClass)  ;
-					  };
+					 Class<$T> aClass = $T.class;
+					 $T<$T> supplier =  () -> registry.getBean($S, $T.class)
+					      .createSupplierForInterface(registry, aClass);
 					 $T definition = $T.rootBeanDefinition(   aClass , supplier).getBeanDefinition();
 					 registry.registerBeanDefinition(aClass.getSimpleName(), definition);
 					""";
