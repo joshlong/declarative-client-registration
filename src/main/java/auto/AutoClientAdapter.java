@@ -16,9 +16,8 @@ public interface AutoClientAdapter {
 	boolean test(Class<?> c);
 
 	/**
-	 * Given a class type and a {@link BeanDefinitionRegistry}, figure out how to register
-	 * the type
+	 * Given a class type and a {@link BeanDefinitionRegistry}, create an instance of that type
 	 */
-	<T> T createSupplierForInterface(BeanDefinitionRegistry registry, Class<T> c);
+	<T> T createClient(BeanDefinitionRegistry registry, Class<T> c);
 
 }

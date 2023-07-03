@@ -66,7 +66,7 @@ class AutoClientRegistrar implements BeanRegistrationExcludeFilter, BeanFactoryI
 			BeanDefinition beanDefinition) {
 		var beanClassName = beanDefinition.getBeanClassName();
 		var aClass = Class.forName(beanClassName);
-		var supplier = (Supplier<?>) () -> adapter.createSupplierForInterface(registry, aClass);
+		var supplier = (Supplier<?>) () -> adapter.createClient(registry, aClass);
 		var definition = BeanDefinitionBuilder.rootBeanDefinition(ResolvableType.forClass(aClass), supplier)
 			.getBeanDefinition();
 		registry.registerBeanDefinition(aClass.getSimpleName(), definition);
@@ -202,11 +202,10 @@ class AutoClientRegistrarAotContribution implements BeanFactoryInitializationAot
 			hints.proxies().registerJdkProxy(AopProxyUtils.completeJdkProxyInterfaces(clazz));
 			var beanName = ClassifierUtils.classifyAdapterBeanNameForClient(this.adapters, clazz);
 			var javaCode = """
-					 Class<$T> aClass = $T.class;
-					 $T<$T> supplier =  () -> registry.getBean($S, $T.class)
-					      .createSupplierForInterface(registry, aClass);
-					 $T definition = $T.rootBeanDefinition(   aClass , supplier).getBeanDefinition();
-					 registry.registerBeanDefinition(aClass.getSimpleName(), definition);
+					 Class<$T> clazz = $T.class;
+					 $T<$T> supplier = () -> registry.getBean($S, $T.class).createClient(registry, clazz);
+					 $T definition = $T.rootBeanDefinition(clazz, supplier).getBeanDefinition();
+					 registry.registerBeanDefinition(clazz.getSimpleName(), definition);
 					""";
 			m.addCode(javaCode, //
 					clazz, clazz, //

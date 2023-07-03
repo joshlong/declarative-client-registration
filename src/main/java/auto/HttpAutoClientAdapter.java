@@ -28,7 +28,7 @@ class HttpAutoClientAdapter implements AutoClientAdapter {
 	}
 
 	@Override
-	public <T> T createSupplierForInterface(BeanDefinitionRegistry registry, Class<T> c) {
+	public <T> T createClient(BeanDefinitionRegistry registry, Class<T> c) {
 		Assert.isInstanceOf(BeanFactory.class, registry, "the " + BeanDefinitionRegistry.class.getName()
 				+ " is not an instance of " + BeanFactory.class.getName());
 		BeanFactory factory = (BeanFactory) registry;
