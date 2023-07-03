@@ -188,7 +188,7 @@ class AutoClientRegistrarAotContribution implements BeanFactoryInitializationAot
 		var runtimeHints = generationContext.getRuntimeHints();
 		var initializingMethodReference = beanFactoryInitializationCode//
 			.getMethods()//
-			.add("autoRegisterClients", methodBuilder -> generateMethod(methodBuilder, runtimeHints))//
+			.add("registerAutoClients", methodBuilder -> generateMethod(methodBuilder, runtimeHints))//
 			.toMethodReference();
 		beanFactoryInitializationCode.addInitializer(initializingMethodReference);
 	}
