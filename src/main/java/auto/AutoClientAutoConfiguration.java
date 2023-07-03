@@ -14,15 +14,15 @@ import java.util.Map;
 @AutoConfiguration
 class AutoClientAutoConfiguration {
 
-    @Bean
-    @ConditionalOnClass({HttpServiceProxyFactory.class, WebClient.class})
-    static AutoClientAdapter httpAutoClientAdapter() {
-        return new HttpAutoClientAdapter();
-    }
+	@Bean
+	@ConditionalOnClass({ HttpServiceProxyFactory.class, WebClient.class })
+	static AutoClientAdapter httpAutoClientAdapter() {
+		return new HttpAutoClientAdapter();
+	}
 
-    @Bean
-    static AutoClientRegistrar autoClientRegistrar(Map<String, AutoClientAdapter> strategy) {
-        return new AutoClientRegistrar(strategy);
-    }
+	@Bean
+	static AutoClientRegistrar autoClientRegistrar(Map<String, AutoClientAdapter> strategy) {
+		return new AutoClientRegistrar(strategy);
+	}
 
 }
