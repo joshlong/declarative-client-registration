@@ -217,9 +217,10 @@ class AutoClientRegistrarAotContribution implements BeanFactoryInitializationAot
 	}
 
 	private static String simpleBeanName(Class<?> inputClazz) {
+		Assert.notNull(inputClazz, "the input class must not be null");
 		var input = Character.toLowerCase(inputClazz.getSimpleName().charAt(0))
 				+ inputClazz.getSimpleName().substring(1);
-		var sb = new StringBuffer();
+		var sb = new StringBuilder();
 		for (var c : input.toCharArray())
 			if (Character.isAlphabetic(c))
 				sb.append(c);

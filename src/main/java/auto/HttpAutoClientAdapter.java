@@ -2,6 +2,7 @@ package auto;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.BeanFactory;
+import org.springframework.beans.factory.ListableBeanFactory;
 import org.springframework.beans.factory.support.BeanDefinitionRegistry;
 import org.springframework.core.annotation.MergedAnnotations;
 import org.springframework.util.Assert;
@@ -16,7 +17,7 @@ import org.springframework.web.service.invoker.HttpServiceProxyFactory;
  * @author Josh Long
  */
 @Slf4j
-class HttpAutoClientAdapter implements AutoClientAdapter {
+class HttpAutoClientAdapter extends AbstractAutoClientAdapter {
 
 	private final MergedAnnotations.Search mergedAnnotations = MergedAnnotations
 		.search(MergedAnnotations.SearchStrategy.TYPE_HIERARCHY);
@@ -29,10 +30,10 @@ class HttpAutoClientAdapter implements AutoClientAdapter {
 
 	@Override
 	public <T> T createClient(BeanDefinitionRegistry registry, Class<T> c) {
-		Assert.isInstanceOf(BeanFactory.class, registry, "the " + BeanDefinitionRegistry.class.getName()
+		Assert.isInstanceOf(ListableBeanFactory.class, registry, "the " + BeanDefinitionRegistry.class.getName()
 				+ " is not an instance of " + BeanFactory.class.getName());
-		BeanFactory factory = (BeanFactory) registry;
-		WebClient webClient = factory.getBean(WebClient.class);
+		ListableBeanFactory factory = (ListableBeanFactory) registry;
+		WebClient webClient = resolveDependency(factory, c, WebClient.class);
 		WebClientAdapter wca = WebClientAdapter.forClient(webClient);
 		return (T) HttpServiceProxyFactory.builder(wca).build().createClient((Class<?>) c);
 	}

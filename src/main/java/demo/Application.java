@@ -3,6 +3,7 @@ package demo;
 import auto.AutoClient;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.aot.hint.annotation.RegisterReflectionForBinding;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -31,6 +32,12 @@ public class Application {
 
 	@Bean
 	WebClient webClient(WebClient.Builder builder) {
+		return builder.build();
+	}
+
+	@Bean
+	@Qualifier("large")
+	WebClient largeMemoryWebClient(WebClient.Builder builder) {
 		var size = 262144 * 10;
 		var strategies = ExchangeStrategies.builder()
 			.codecs(codecs -> codecs.defaultCodecs().maxInMemorySize(size))
@@ -42,20 +49,20 @@ public class Application {
 	ApplicationRunner applicationRunner(Todos todos, Weather weather, Newspapers newspapers) {
 		return arguments -> {
 			var map = Map.<String, Supplier<Object>>of(//
-					"newspapers", () -> newspapers.newspapers().get("newspapers"), //
+					"newspapers", () -> newspapers.newspapers().get("newspapers").subList(0, 5), //
 					"todos", () -> todos.todoById(192), //
 					"weather forecast", () -> {
 						var points = weather.points(37.7897d, -122.4009d);
-						return weather.forecast(points.properties().gridId(), //
-								points.properties().gridX(), //
-								points.properties().gridY()//
+						var properties = points.properties();
+						return weather.forecast(properties.gridId(), properties.gridX(), properties.gridY()//
 						);
 					});
 			map.forEach((name, supplier) -> {
 				var result = supplier.get();
-				log.info("================================");
-				log.info(name.toUpperCase(Locale.ENGLISH));
-				log.info(result.toString());
+				var out = System.out;
+				out.println("================================");
+				out.println(name.toUpperCase(Locale.ENGLISH));
+				out.println(result.toString());
 			});
 		};
 	}
@@ -63,6 +70,7 @@ public class Application {
 }
 
 @AutoClient
+@Qualifier("webClient")
 @HttpExchange("https://jsonplaceholder.typicode.com")
 interface Todos {
 
@@ -71,6 +79,7 @@ interface Todos {
 
 }
 
+@Qualifier("large")
 @AutoClient
 @HttpExchange("https://chroniclingamerica.loc.gov")
 interface Newspapers {
@@ -80,6 +89,7 @@ interface Newspapers {
 
 }
 
+@Qualifier("webClient")
 @AutoClient
 @HttpExchange("https://api.weather.gov")
 interface Weather {
