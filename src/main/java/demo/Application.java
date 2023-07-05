@@ -14,9 +14,10 @@ import org.springframework.web.service.annotation.GetExchange;
 import org.springframework.web.service.annotation.HttpExchange;
 
 import java.net.URL;
-import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.function.Supplier;
 
 @Slf4j
 
@@ -44,22 +45,23 @@ public class Application {
 
 	@Bean
 	ApplicationRunner applicationRunner(Todos todos, Weather weather, Newspapers newspapers) {
-		return a -> {
-
-			log.info("newspapers");
-			newspapers.newspapers().get("newspapers").forEach(t -> log.info(t.toString()));
-
-			log.info("todos");
-			log.info(todos.todoById(192).toString());
-
-			log.info("weather points");
-			var points = weather.points(37.7897d, -122.4009d);
-			log.info(points.toString());
-
-			log.info("weather forecast");
-			var forecast = weather.forecast(points.properties().gridId(), points.properties().gridX(),
-					points.properties().gridY());
-			Arrays.stream(forecast.properties().periods()).forEach(p -> log.info(p.toString()));
+		return arguments -> {
+			var map = Map.<String, Supplier<Object>>of(//
+					"newspapers", () -> newspapers.newspapers().get("newspapers"), //
+					"todos", () -> todos.todoById(192), //
+					"weather forecast", () -> {
+						var points = weather.points(37.7897d, -122.4009d);
+						return weather.forecast(points.properties().gridId(), //
+								points.properties().gridX(), //
+								points.properties().gridY()//
+						);
+					});
+			map.forEach((name, supplier) -> {
+				var result = supplier.get();
+				log.info("================================");
+				log.info(name.toUpperCase(Locale.ENGLISH));
+				log.info(result.toString());
+			});
 		};
 	}
 
