@@ -27,7 +27,7 @@ public class Application {
 	}
 
 	@Bean
-	ApplicationRunner applicationRunner(Todos todos, Todos2 todos2) {
+	ApplicationRunner applicationRunner(Todos todos, TodosTwo todos2) {
 		return a -> {
 
 			log.info("ALL");
@@ -35,7 +35,7 @@ public class Application {
 
 			log.info("BY ID");
 			log.info(todos.todoById(192).toString());
-			;
+
 		};
 	}
 
@@ -52,7 +52,7 @@ interface Todos {
 
 @AutoClient
 @HttpExchange("https://jsonplaceholder.typicode.com")
-interface Todos2 {
+interface TodosTwo {
 
 	@GetExchange("/todos")
 	List<Todo> todos();

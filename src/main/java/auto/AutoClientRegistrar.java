@@ -4,7 +4,6 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.aop.framework.AopProxyUtils;
 import org.springframework.aot.generate.GenerationContext;
-import org.springframework.aot.hint.RuntimeHints;
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.BeanFactory;
 import org.springframework.beans.factory.ListableBeanFactory;
@@ -24,7 +23,6 @@ import org.springframework.core.ResolvableType;
 import org.springframework.core.env.Environment;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.core.type.filter.AnnotationTypeFilter;
-import org.springframework.javapoet.MethodSpec;
 import org.springframework.util.Assert;
 import org.springframework.util.ClassUtils;
 
@@ -185,36 +183,48 @@ class AutoClientRegistrarAotContribution implements BeanFactoryInitializationAot
 	@Override
 	public void applyTo(GenerationContext generationContext,
 			BeanFactoryInitializationCode beanFactoryInitializationCode) {
+
 		var runtimeHints = generationContext.getRuntimeHints();
-		var initializingMethodReference = beanFactoryInitializationCode//
-			.getMethods()//
-			.add("registerAutoClients", methodBuilder -> generateMethod(methodBuilder, runtimeHints))//
-			.toMethodReference();
-		beanFactoryInitializationCode.addInitializer(initializingMethodReference);
+		this.candidates.forEach(prospect -> {
+			var methodReference = beanFactoryInitializationCode//
+				.getMethods()//
+				.add("registerAutoClients", methodSpecBuilder -> {
+					var clazz = ClassUtils.resolveClassName(Objects.requireNonNull(prospect.getBeanClassName()), null);
+					methodSpecBuilder.addModifiers(Modifier.PUBLIC);
+					methodSpecBuilder.addJavadoc("Automatically register service client for class " + clazz.getName());
+					methodSpecBuilder.addParameter(DefaultListableBeanFactory.class, "registry");
+
+					runtimeHints.proxies().registerJdkProxy(AopProxyUtils.completeJdkProxyInterfaces(clazz));
+					var beanName = ClassifierUtils.classifyAdapterBeanNameForClient(this.adapters, clazz);
+					var javaCode = """
+							 Class<$T> clazz$L = $T.class;
+							 $T<$T> supplier$L = () -> registry.getBean($S, $T.class)
+							 	.createClient(registry, clazz$L);
+							 $T definition$L = $T.rootBeanDefinition(clazz$L, supplier$L).getBeanDefinition();
+							 registry.registerBeanDefinition("$L", definition$L);
+							""";
+					var suffix = "";
+					methodSpecBuilder.addCode(javaCode, //
+							clazz, suffix, clazz, //
+							Supplier.class, clazz, suffix, beanName, AutoClientAdapter.class, suffix, //
+							BeanDefinition.class, suffix, BeanDefinitionBuilder.class, suffix, suffix, //
+							simpleBeanName(clazz), suffix);
+
+				})//
+				.toMethodReference();
+
+			beanFactoryInitializationCode.addInitializer(methodReference);
+		});
 	}
 
-	private void generateMethod(MethodSpec.Builder m, RuntimeHints hints) {
-		m.addModifiers(Modifier.PUBLIC);
-		m.addJavadoc("Automatically register service clients ");
-		m.addParameter(DefaultListableBeanFactory.class, "registry");
-		this.candidates.forEach(beanDefinition -> {
-			var clazz = ClassUtils.resolveClassName(Objects.requireNonNull(beanDefinition.getBeanClassName()), null);
-			hints.proxies().registerJdkProxy(AopProxyUtils.completeJdkProxyInterfaces(clazz));
-			var beanName = ClassifierUtils.classifyAdapterBeanNameForClient(this.adapters, clazz);
-			var javaCode = """
-					 Class<$T> clazz$L = $T.class;
-					 $T<$T> supplier$L = () -> registry.getBean($S, $T.class)
-					 	.createClient(registry, clazz$L);
-					 $T definition$L = $T.rootBeanDefinition(clazz$L, supplier$L).getBeanDefinition();
-					 registry.registerBeanDefinition("declarative$LClient", definition$L);
-					""";
-			var suffix = clazz.getSimpleName();
-			m.addCode(javaCode, //
-					clazz, suffix, clazz, //
-					Supplier.class, clazz, suffix, beanName, AutoClientAdapter.class, suffix, //
-					BeanDefinition.class, suffix, BeanDefinitionBuilder.class, suffix, suffix, //
-					suffix, suffix);
-		});
+	private static String simpleBeanName(Class<?> inputClazz) {
+		var input = Character.toLowerCase(inputClazz.getSimpleName().charAt(0))
+				+ inputClazz.getSimpleName().substring(1);
+		var sb = new StringBuffer();
+		for (var c : input.toCharArray())
+			if (Character.isAlphabetic(c))
+				sb.append(c);
+		return sb.toString();
 	}
 
 }
