@@ -20,13 +20,8 @@ import java.util.Map;
 import java.util.function.Supplier;
 
 @Slf4j
-
-@RegisterReflectionForBinding({
-		// points
-		Points.class, Points.Geometry.class, Points.PointsProperties.class,
-		// forecast
-		Forecast.class, Forecast.ForecastProperties.Period.class, Forecast.ForecastProperties.class })
-
+@RegisterReflectionForBinding({ Points.class, Points.Geometry.class, Points.PointsProperties.class, Forecast.class,
+		Forecast.ForecastProperties.Period.class, Forecast.ForecastProperties.class })
 @SpringBootApplication
 public class Application {
 
