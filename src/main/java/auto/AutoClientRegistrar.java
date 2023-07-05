@@ -193,7 +193,6 @@ class AutoClientRegistrarAotContribution implements BeanFactoryInitializationAot
 					methodSpecBuilder.addModifiers(Modifier.PUBLIC);
 					methodSpecBuilder.addJavadoc("Automatically register service client for class " + clazz.getName());
 					methodSpecBuilder.addParameter(DefaultListableBeanFactory.class, "registry");
-
 					runtimeHints.proxies().registerJdkProxy(AopProxyUtils.completeJdkProxyInterfaces(clazz));
 					var beanName = ClassifierUtils.classifyAdapterBeanNameForClient(this.adapters, clazz);
 					var javaCode = """

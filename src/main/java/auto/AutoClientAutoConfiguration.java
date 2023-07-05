@@ -14,6 +14,8 @@ import java.util.Map;
 @AutoConfiguration
 class AutoClientAutoConfiguration {
 
+	// todo register an AutoClientAdapter for RSocket..
+
 	@Bean
 	@ConditionalOnClass({ HttpServiceProxyFactory.class, WebClient.class })
 	static AutoClientAdapter httpAutoClientAdapter() {

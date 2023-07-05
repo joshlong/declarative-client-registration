@@ -30,7 +30,8 @@ public class Application {
 		SpringApplication.run(Application.class, args);
 	}
 
-	@Bean
+	@Bean // this has no explicit qualifier but we use a qualifier on interface and use
+			// this beanName (fragile!)
 	WebClient webClient(WebClient.Builder builder) {
 		return builder.build();
 	}
