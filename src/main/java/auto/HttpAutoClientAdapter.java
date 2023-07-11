@@ -32,9 +32,9 @@ class HttpAutoClientAdapter extends AbstractAutoClientAdapter {
 	public <T> T createClient(BeanDefinitionRegistry registry, Class<T> c) {
 		Assert.isInstanceOf(ListableBeanFactory.class, registry, "the " + BeanDefinitionRegistry.class.getName()
 				+ " is not an instance of " + BeanFactory.class.getName());
-		ListableBeanFactory factory = (ListableBeanFactory) registry;
-		WebClient webClient = resolveDependency(factory, c, WebClient.class);
-		WebClientAdapter wca = WebClientAdapter.forClient(webClient);
+		var factory = (ListableBeanFactory) registry;
+		var webClient = resolveDependency(factory, c, WebClient.class);
+		var wca = WebClientAdapter.forClient(webClient);
 		return (T) HttpServiceProxyFactory.builder(wca).build().createClient((Class<?>) c);
 	}
 
